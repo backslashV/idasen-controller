@@ -1,5 +1,6 @@
 #!python3
 import os
+import datetime
 import shutil
 import struct
 import argparse
@@ -208,7 +209,7 @@ async def move_to(client, target):
         global count
         height, speed = struct.unpack("<Hh", data)
         count = count + 1
-        print("Height: {:4.0f}mm Target: {:4.0f}mm Speed: {:2.0f}mm/s".format(rawToMM(height), rawToMM(target), rawToSpeed(speed)))
+        #print("Height: {:4.0f}mm Target: {:4.0f}mm Speed: {:2.0f}mm/s".format(rawToMM(height), rawToMM(target), rawToSpeed(speed)))
 
        
         # Stop if we have reached the target OR
@@ -252,7 +253,6 @@ async def move_to(client, target):
             print('Timed out while waiting for desk')
             await unsubscribe(client, UUID_HEIGHT)
 
-
 def unpickle_desk():
     """Load a Bleak device config from a pickle file and check that it is the correct device"""
     try:
@@ -270,6 +270,14 @@ def pickle_desk(desk):
     if not IS_WINDOWS:
         with open(PICKLE_FILE, 'wb') as f: 
             pickle.dump(desk, f)
+
+def is_skip_day():
+    """Check the script's modification date to see if it was 'touched' today"""
+    t = os.path.getmtime(__file__)
+    modification_day = datetime.datetime.fromtimestamp(t).day
+    if (modification_day == datetime.date.today().day):
+        return True
+    return False
 
 async def scan(mac_address = None):
     """Scan for a bluetooth device with the configured address and return it or return all devices if no address specified"""
@@ -333,18 +341,21 @@ async def run_command(client, config):
     # Always print current height
     initial_height, speed = struct.unpack("<Hh", await client.read_gatt_char(UUID_HEIGHT))
     print("Height: {:4.0f}mm".format(rawToMM(initial_height)))
+    current_height = int("{:4.0f}".format(rawToMM(initial_height)))
     target = None
+    skip_sit = is_skip_day() or abs(current_height - config['sit_height']) < 20
+    skip_stand = is_skip_day() or abs(current_height - config['stand_height']) < 20
     if config['monitor']:
         # Print changes to height data
         await subscribe(client, UUID_HEIGHT, print_height_data)
         loop = asyncio.get_event_loop()
         wait = loop.create_future()
         await wait
-    elif config['sit']:
+    elif config['sit'] and not skip_sit:
         # Move to configured sit height
         target = config['sit_height_raw']
         await move_to(client, target)
-    elif config['stand']:
+    elif config['stand'] and not skip_stand:
         # Move to configured stand height
         target = config['stand_height_raw']
         await move_to(client, target)
